@@ -1,0 +1,30 @@
+For each frame:
+    Get detections
+    Predict positions for all active tracks (Kalman)
+        - consider the time as an input!
+    
+    If num_detections >= 1:
+        If num_detections >= 2:
+            Estimate global translation via RANSAC
+        Else:
+            Use translation from single correspondence (against whichever track it's closest to)
+
+        Apply global translation to predicted positions
+
+        Build cost matrix between detections and motion-compensated tracks
+        Run Hungarian assignment
+
+        For each matched pair:
+            Update Kalman filter, reset missed count
+
+        For unmatched tracks:
+            Increment missed count, keep predicting
+
+        For unmatched detections:
+            Start new tracks with unique IDs
+
+    Else:
+        No detections — all tracks predict forward
+        Increment missed count for all tracks
+
+    Remove tracks exceeding max_age missed frames
