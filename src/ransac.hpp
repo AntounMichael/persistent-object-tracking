@@ -11,4 +11,4 @@ struct RansacResult {
 
 RansacResult ransac_translation(const std::vector<Eigen::Vector2d>& src,
                                 const std::vector<Eigen::Vector2d>& dst,
-                                int iterations = 100, double threshold = .20, double max_offset = 0.05);
+                                int iterations = 100, double threshold = .10, double max_offset = 0.1);

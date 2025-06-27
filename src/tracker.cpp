@@ -1,7 +1,8 @@
 #include "tracker.hpp"
 #include "kalman_filter.hpp"
 #include "ransac.hpp"
-#include "hungarian.hpp"
+#include "munkres.h"
+#include "matrix.h"
 #include <iostream>
 #include <limits>
 #include <iomanip>
@@ -101,6 +102,21 @@ std::vector<int> Tracker::update_tracks_with_ids(const std::vector<Detection>& d
     size_t num_detections = detections.size();
     std::set<int> updated_tracks, unobserved_tracks, dead_tracks;
     std::vector<double> track_moves(num_tracks, 0.0);
+    std::cout << "[DEBUG] num_tracks: " << num_tracks << ", num_detections: " << num_detections << std::endl;
+    if (num_tracks == 0) {
+        // No tracks: create a new track for each detection
+        for (size_t j = 0; j < num_detections; ++j) {
+            std::cout << "[DEBUG] No tracks. Creating new track for detection " << j << " with ID " << next_id << std::endl;
+            Track new_track;
+            new_track.id = next_id++;
+            new_track.missed_count = 0;
+            new_track.state = detections[j];
+            new_track.kf.init(detections[j].x, detections[j].y, 0, 0);
+            tracks.push_back(new_track);
+            ids[j] = new_track.id;
+        }
+        return ids;
+    }
     if (num_detections == 0) {
         for (auto& track : tracks) track.missed_count++;
         for (const auto& track : tracks) unobserved_tracks.insert(track.id);
@@ -177,18 +193,65 @@ std::vector<int> Tracker::update_tracks_with_ids(const std::vector<Detection>& d
     // Log the cost matrix
     std::cout << "Cost matrix (track x detection):\n";
     for (size_t i = 0; i < num_tracks; ++i) {
-        std::cout << "Track " << i << ": ";
+        std::cout << "Track " << i << " (ID " << tracks[i].id << "): ";
         for (size_t j = 0; j < num_detections; ++j) {
             std::cout << std::fixed << std::setprecision(3) << cost[i][j] << " ";
         }
         std::cout << std::endl;
     }
-    std::vector<int> assignment;
-    hungarian(cost, assignment);
+    // Use munkres-cpp for assignment
+    Munkres<double> munkres;
+    Matrix<double> munkres_matrix(num_tracks, num_detections);
+    for (size_t i = 0; i < num_tracks; ++i)
+        for (size_t j = 0; j < num_detections; ++j)
+            munkres_matrix(i, j) = cost[i][j];
+    munkres.solve(munkres_matrix);
+    std::vector<int> assignment(num_tracks, -1);
+    for (size_t i = 0; i < num_tracks; ++i) {
+        for (size_t j = 0; j < num_detections; ++j) {
+            if (munkres_matrix(i, j) == 0) {
+                assignment[i] = j;
+                break;
+            }
+        }
+    }
+    std::cout << "Assignment array (track index -> detection index): ";
+    for (size_t i = 0; i < assignment.size(); ++i) {
+        std::cout << i << "->" << assignment[i] << " ";
+    }
+    std::cout << std::endl;
     const double threshold = 0.2; // threshold for assignment
     std::vector<bool> detection_assigned(num_detections, false);
+    std::cout << "[DEBUG] num_tracks: " << num_tracks << ", num_detections: " << num_detections << std::endl;
+    if (num_tracks == 0) {
+        // No tracks: create a new track for each detection
+        for (size_t j = 0; j < num_detections; ++j) {
+            std::cout << "[DEBUG] No tracks. Creating new track for detection " << j << " with ID " << next_id << std::endl;
+            Track new_track;
+            new_track.id = next_id++;
+            new_track.missed_count = 0;
+            new_track.state = detections[j];
+            new_track.kf.init(detections[j].x, detections[j].y, 0, 0);
+            tracks.push_back(new_track);
+            ids[j] = new_track.id;
+        }
+        return ids;
+    }
+    if (num_detections == 0) {
+        for (auto& track : tracks) track.missed_count++;
+        for (const auto& track : tracks) unobserved_tracks.insert(track.id);
+        std::cout << "No detections. All tracks predict forward. Unobserved: ";
+        for (int id : unobserved_tracks) std::cout << id << " ";
+        std::cout << std::endl;
+        return ids;
+    }
     for (size_t i = 0; i < num_tracks; ++i) {
         int det_idx = assignment[i];
+        if (det_idx >= 0 && det_idx < (int)num_detections) {
+            std::cout << "Track " << tracks[i].id << " assigned to detection " << det_idx << " with cost " << cost[i][det_idx] << std::endl;
+        } else {
+            std::cout << "Track " << tracks[i].id << " not assigned to any detection." << std::endl;
+        }
         if (det_idx >= 0 && det_idx < (int)num_detections && !detection_assigned[det_idx] && cost[i][det_idx] < threshold) { // threshold
             double dx = tracks[i].state.x - detections[det_idx].x;
             double dy = tracks[i].state.y - detections[det_idx].y;
@@ -200,6 +263,13 @@ std::vector<int> Tracker::update_tracks_with_ids(const std::vector<Detection>& d
             detection_assigned[det_idx] = true;
             updated_tracks.insert(tracks[i].id);
         } else {
+            if (det_idx >= 0 && det_idx < (int)num_detections && cost[i][det_idx] >= threshold) {
+                std::cout << "Track " << tracks[i].id << " assignment cost " << cost[i][det_idx] << " exceeds threshold " << threshold << ". Marking as unobserved." << std::endl;
+            } else if (det_idx >= 0 && det_idx < (int)num_detections && detection_assigned[det_idx]) {
+                std::cout << "Detection " << det_idx << " already assigned. Track " << tracks[i].id << " marked as unobserved." << std::endl;
+            } else {
+                std::cout << "Track " << tracks[i].id << " not assigned. Marking as unobserved." << std::endl;
+            }
             tracks[i].missed_count++;
             unobserved_tracks.insert(tracks[i].id);
         }
@@ -207,6 +277,7 @@ std::vector<int> Tracker::update_tracks_with_ids(const std::vector<Detection>& d
     // Unmatched detections
     for (size_t j = 0; j < num_detections; ++j) {
         if (!detection_assigned[j]) {
+            std::cout << "Detection " << j << " not assigned to any track. Creating new track with ID " << next_id << std::endl;
             Track new_track;
             new_track.id = next_id++;
             new_track.missed_count = 0;

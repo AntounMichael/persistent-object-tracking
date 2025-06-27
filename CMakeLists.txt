@@ -7,6 +7,7 @@ include_directories(${OpenCV_INCLUDE_DIRS})
 # Add Eigen include directory
 include_directories(${CMAKE_SOURCE_DIR}/external/eigen-3.4.0)
 include_directories(${CMAKE_SOURCE_DIR}/include)
+include_directories(${CMAKE_SOURCE_DIR}/external/munkres-cpp/src)
 
 add_executable(red-barn-robotics
     src/main.cpp
