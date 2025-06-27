@@ -199,84 +199,68 @@ std::vector<int> Tracker::update_tracks_with_ids(const std::vector<Detection>& d
         }
         std::cout << std::endl;
     }
-    // Use munkres-cpp for assignment
-    Munkres<double> munkres;
-    Matrix<double> munkres_matrix(num_tracks, num_detections);
-    for (size_t i = 0; i < num_tracks; ++i)
-        for (size_t j = 0; j < num_detections; ++j)
-            munkres_matrix(i, j) = cost[i][j];
-    munkres.solve(munkres_matrix);
-    std::vector<int> assignment(num_tracks, -1);
+    // Expose new track penalty as a variable
+    const double new_track_penalty = 0.35; // <-- Tune this as needed
+    // Use a robust assignment matrix size: tracks + detections
+    size_t dim = num_tracks + num_detections;
+    // Build augmented cost matrix
+    std::vector<std::vector<double>> cost_aug(dim, std::vector<double>(dim, new_track_penalty));
+    // Fill real costs in top-left block
     for (size_t i = 0; i < num_tracks; ++i) {
         for (size_t j = 0; j < num_detections; ++j) {
-            if (munkres_matrix(i, j) == 0) {
-                assignment[i] = j;
+            cost_aug[i][j] = cost[i][j];
+        }
+    }
+    // Use munkres-cpp for assignment
+    Munkres<double> munkres;
+    Matrix<double> munkres_matrix(dim, dim);
+    for (size_t i = 0; i < dim; ++i)
+        for (size_t j = 0; j < dim; ++j)
+            munkres_matrix(i, j) = cost_aug[i][j];
+    munkres.solve(munkres_matrix);
+
+    std::vector<bool> detection_assigned(num_detections, false);
+    // Combined assignment extraction and track update loop
+    const double threshold = 0.2; // threshold for assignment (tune as needed)
+    for (size_t i = 0; i < num_tracks; ++i) {
+        int assigned_det = -1;
+        double assigned_cost = new_track_penalty;
+        // Find assignment for this track from the munkres result
+        for (size_t j = 0; j < num_detections; ++j) {
+            if (munkres_matrix(i, j) == 0 && cost_aug[i][j] < new_track_penalty) {
+                assigned_det = j;
+                assigned_cost = cost[i][j];
                 break;
             }
         }
-    }
-    std::cout << "Assignment array (track index -> detection index): ";
-    for (size_t i = 0; i < assignment.size(); ++i) {
-        std::cout << i << "->" << assignment[i] << " ";
-    }
-    std::cout << std::endl;
-    const double threshold = 0.2; // threshold for assignment
-    std::vector<bool> detection_assigned(num_detections, false);
-    std::cout << "[DEBUG] num_tracks: " << num_tracks << ", num_detections: " << num_detections << std::endl;
-    if (num_tracks == 0) {
-        // No tracks: create a new track for each detection
-        for (size_t j = 0; j < num_detections; ++j) {
-            std::cout << "[DEBUG] No tracks. Creating new track for detection " << j << " with ID " << next_id << std::endl;
-            Track new_track;
-            new_track.id = next_id++;
-            new_track.missed_count = 0;
-            new_track.state = detections[j];
-            new_track.kf.init(detections[j].x, detections[j].y, 0, 0);
-            tracks.push_back(new_track);
-            ids[j] = new_track.id;
-        }
-        return ids;
-    }
-    if (num_detections == 0) {
-        for (auto& track : tracks) track.missed_count++;
-        for (const auto& track : tracks) unobserved_tracks.insert(track.id);
-        std::cout << "No detections. All tracks predict forward. Unobserved: ";
-        for (int id : unobserved_tracks) std::cout << id << " ";
-        std::cout << std::endl;
-        return ids;
-    }
-    for (size_t i = 0; i < num_tracks; ++i) {
-        int det_idx = assignment[i];
-        if (det_idx >= 0 && det_idx < (int)num_detections) {
-            std::cout << "Track " << tracks[i].id << " assigned to detection " << det_idx << " with cost " << cost[i][det_idx] << std::endl;
-        } else {
-            std::cout << "Track " << tracks[i].id << " not assigned to any detection." << std::endl;
-        }
-        if (det_idx >= 0 && det_idx < (int)num_detections && !detection_assigned[det_idx] && cost[i][det_idx] < threshold) { // threshold
-            double dx = tracks[i].state.x - detections[det_idx].x;
-            double dy = tracks[i].state.y - detections[det_idx].y;
+        if (assigned_det >= 0 && assigned_cost < threshold) {
+            // Accept assignment, update track
+            double dx = tracks[i].state.x - detections[assigned_det].x;
+            double dy = tracks[i].state.y - detections[assigned_det].y;
             double move = std::sqrt(dx*dx + dy*dy);
             track_moves[i] = move;
-            kalman_update(tracks[i], detections[det_idx]);
+            kalman_update(tracks[i], detections[assigned_det]);
             tracks[i].missed_count = 0;
-            ids[det_idx] = tracks[i].id;
-            detection_assigned[det_idx] = true;
+            ids[assigned_det] = tracks[i].id;
             updated_tracks.insert(tracks[i].id);
+            detection_assigned[assigned_det] = true;
         } else {
-            if (det_idx >= 0 && det_idx < (int)num_detections && cost[i][det_idx] >= threshold) {
-                std::cout << "Track " << tracks[i].id << " assignment cost " << cost[i][det_idx] << " exceeds threshold " << threshold << ". Marking as unobserved." << std::endl;
-            } else if (det_idx >= 0 && det_idx < (int)num_detections && detection_assigned[det_idx]) {
-                std::cout << "Detection " << det_idx << " already assigned. Track " << tracks[i].id << " marked as unobserved." << std::endl;
-            } else {
-                std::cout << "Track " << tracks[i].id << " not assigned. Marking as unobserved." << std::endl;
-            }
+            // No valid assignment or cost too high
             tracks[i].missed_count++;
             unobserved_tracks.insert(tracks[i].id);
         }
     }
-    // Unmatched detections
+    // Create new tracks for unassigned detections (i.e., those assigned to dummy rows)
     for (size_t j = 0; j < num_detections; ++j) {
-        if (!detection_assigned[j]) {
+        bool assigned = false;
+        for (size_t i = 0; i < num_tracks; ++i) {
+            if (ids[j] == tracks[i].id) {
+                assigned = true;
+                break;
+            }
+        }
+        if (!assigned) {
+            // This detection was not assigned to any existing track, so create a new track
             std::cout << "Detection " << j << " not assigned to any track. Creating new track with ID " << next_id << std::endl;
             Track new_track;
             new_track.id = next_id++;

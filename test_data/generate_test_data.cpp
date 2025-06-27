@@ -46,7 +46,7 @@ int main() {
     int num_objects = 15;
     int num_frames = 60;
     double min_object_distance = 0.15;
-    double dropout_probability = 0.0;
+    double dropout_probability = 0.05;
     int dropout_min = 1, dropout_max = 3;
     double noise_stddev_pos = 0; //0.01;
     double noise_stddev_size = 0; //0.0025;
