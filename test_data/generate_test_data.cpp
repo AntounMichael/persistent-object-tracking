@@ -43,7 +43,7 @@ std::string make_timestamp(int frame_id, int fps = 10) {
 // Main generator
 int main() {
     // Parameters (can be made configurable)
-    int num_objects = 15;
+    int num_objects = 45;
     int num_frames = 60;
     double min_object_distance = 0.15;
     double dropout_probability = 0.05;
@@ -54,7 +54,9 @@ int main() {
     // Camera moves left to right across the plane
     double cam_w = 0.7, cam_h = 0.7;
     double cam_y0 = 0;
-    double cam_y1 = 1.0; // Camera moves vertically from y0 to y1
+    double cam_y1 = 1.5; // Camera moves vertically from y0 to y1
+    double cam_x0 = 0; // Camera starts at x0
+    double cam_x1 = .5; // Camera ends at x1
     // Calculate the area traversed by the camera over all frames
     std::string output_path = "test_data/data/input_data.json";
 
@@ -70,7 +72,7 @@ int main() {
         double x, y, w, h;
         int tries = 0;
         while (true) {
-            x = pos_dist(rng) * cam_w; // x in [0, cam_w]
+            x = pos_dist(rng) * (cam_x1 + cam_w - cam_x0); // x in [0, cam_w]
             y = cam_y0 + pos_dist(rng) * (cam_y1 + cam_h - cam_y0); // y in [cam_y0, cam_y1 + cam_h]
             w = size_dist(rng);
             h = size_dist(rng);
@@ -106,7 +108,7 @@ int main() {
     for (int frame = 0; frame < num_frames; ++frame) {
         // Interpolate camera position
         double t = double(frame) / (num_frames-1);
-        double cam_x = 0;
+        double cam_x = cam_x0 + t * (cam_x1 - cam_x0);
         double cam_y = cam_y0 + t * (cam_y1 - cam_y0);
 
         json frame_json;
@@ -133,7 +135,7 @@ int main() {
             double nw = obj.true_width + noise_size(rng);
             double nh = obj.true_height + noise_size(rng);
             detections.push_back({
-                {"x", nx},
+                {"x", nx - cam_x},
                 {"y", ny - cam_y},
                 {"width", nw},
                 {"height", nh}

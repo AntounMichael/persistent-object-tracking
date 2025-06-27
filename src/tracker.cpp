@@ -178,6 +178,7 @@ std::vector<int> Tracker::update_tracks_with_ids(const std::vector<Detection>& d
         std::cout << "RANSAC not run (not enough tracks/detections)\n";
     }
     // Build cost matrix (Euclidean distance + weighted width/height dissimilarity)
+    const double max_assignment_distance = 0.2; // Maximum allowed distance for assignment (tune as needed)
     double wh_weight = 1.0; // Set to >0 to enable width/height dissimilarity
     std::vector<std::vector<double>> cost(num_tracks, std::vector<double>(num_detections, 1e6));
     for (size_t i = 0; i < num_tracks; ++i) {
@@ -187,7 +188,12 @@ std::vector<int> Tracker::update_tracks_with_ids(const std::vector<Detection>& d
             double dpos = std::sqrt(dx*dx + dy*dy);
             double dwh = std::abs(tracks[i].state.width - detections[j].width) +
                          std::abs(tracks[i].state.height - detections[j].height);
-            cost[i][j] = dpos + wh_weight * dwh;
+            double cost_val = dpos + wh_weight * dwh;
+            if (dpos > max_assignment_distance) {
+                cost[i][j] = 1e6; // Too far, do not allow assignment
+            } else {
+                cost[i][j] = cost_val;
+            }
         }
     }
     // Log the cost matrix
@@ -221,7 +227,6 @@ std::vector<int> Tracker::update_tracks_with_ids(const std::vector<Detection>& d
 
     std::vector<bool> detection_assigned(num_detections, false);
     // Combined assignment extraction and track update loop
-    const double threshold = 0.2; // threshold for assignment (tune as needed)
     for (size_t i = 0; i < num_tracks; ++i) {
         int assigned_det = -1;
         double assigned_cost = new_track_penalty;
@@ -233,7 +238,7 @@ std::vector<int> Tracker::update_tracks_with_ids(const std::vector<Detection>& d
                 break;
             }
         }
-        if (assigned_det >= 0 && assigned_cost < threshold) {
+        if (assigned_det >= 0) {
             // Accept assignment, update track
             double dx = tracks[i].state.x - detections[assigned_det].x;
             double dy = tracks[i].state.y - detections[assigned_det].y;
