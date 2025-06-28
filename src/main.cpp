@@ -48,9 +48,17 @@ std::string get_arg(int argc, char** argv, const std::string& flag, const std::s
 }
 
 int main(int argc, char** argv) {
-    std::string input_file = get_arg(argc, argv, "--input", "../test_data/data/input_data.json");
-    std::string output_file = get_arg(argc, argv, "--output", "output.json");
-    std::string vis_dir = get_arg(argc, argv, "--vis-dir", "visualizations");
+    // Parse required arguments
+    std::string input_file, output_file, vis_dir;
+    for (int i = 1; i < argc; ++i) {
+        if (std::string(argv[i]) == "--input" && i+1 < argc) input_file = argv[++i];
+        else if (std::string(argv[i]) == "--output" && i+1 < argc) output_file = argv[++i];
+        else if (std::string(argv[i]) == "--vis-dir" && i+1 < argc) vis_dir = argv[++i];
+    }
+    if (input_file.empty() || output_file.empty() || vis_dir.empty()) {
+        std::cerr << "Usage: tracking-solution --input <input> --output <output> --vis-dir <dir>\n";
+        return 1;
+    }
     std::filesystem::create_directories(vis_dir);
     auto frames = load_frames(input_file);
     Tracker tracker;

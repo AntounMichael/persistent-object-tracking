@@ -58,7 +58,7 @@ int main() {
     double cam_x0 = 0; // Camera starts at x0
     double cam_x1 = .5; // Camera ends at x1
     // Calculate the area traversed by the camera over all frames
-    std::string output_path = "test_data/data/input_data.json";
+    std::string output_path = "/data/input_data.json";
 
     // Random number generator and distributions
     std::mt19937 rng(std::random_device{}());

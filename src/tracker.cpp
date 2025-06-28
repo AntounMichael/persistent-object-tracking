@@ -206,7 +206,7 @@ std::vector<int> Tracker::update_tracks_with_ids(const std::vector<Detection>& d
         std::cout << std::endl;
     }
     // Expose new track penalty as a variable
-    const double new_track_penalty = 0.35; // <-- Tune this as needed
+    const double new_track_penalty = 0.21; // <-- Tune this as needed
     // Use a robust assignment matrix size: tracks + detections
     size_t dim = num_tracks + num_detections;
     // Build augmented cost matrix
