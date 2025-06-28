@@ -13,6 +13,9 @@ RUN apt-get update && \
 # Copy source code
 COPY . .
 
+# Clone the munkres-cpp library into /app/external/munkres-cpp
+RUN git clone https://github.com/saebyn/munkres-cpp.git external/munkres-cpp
+
 # Build the tracker and test data generator in /app/build
 RUN mkdir -p build \
     && cd build \
